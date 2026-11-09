@@ -1,0 +1,28 @@
+name = "isoopod/vow"
+version = "0.1.3"
+description = "A Data-Oriented Procedural Promise/Future Library · ×6 faster. ×32 lighter. ×∞ less garbage."
+authors = ["synttx <synttx@proton.me>", "isoopod"]
+license = "MPL-2.0"
+repository = "https://github.com/Placeholder-Studios-RBLX/Vow"
+
+includes = ["pesde.toml", "README.md", "LICENSE", "src/**"]
+
+[target]
+environment = "roblox"
+lib = "src/vow.luau"
+build_files = ["src"]
+
+[indices]
+default = "https://github.com/pesde-pkg/index"
+
+[scripts]
+roblox_sync_config_generator = ".pesde/scripts/roblox_sync_config_generator.luau"
+sourcemap_generator = ".pesde/scripts/sourcemap_generator.luau"
+
+[dev_dependencies]
+scripts = { name = "pesde/scripts_rojo", version = "^0.2.0", target = "lune" }
+rojo = { name = "pesde/rojo", version = "^7.5.1", target = "lune" }
+
+[engines]
+pesde = "^0.7.0"
+lune = "^0.10.2"
