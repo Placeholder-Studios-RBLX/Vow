@@ -61,9 +61,11 @@
 	@license MPL-2.0
 ]=]
 
-export type Vow = number
+-- We add a phantom type to vow so the type solver can distinguish between it and a normal number.
+-- In reality, it is just a number, but this allows for stricter type checking with Vows.
+export type Vow<T = any, E = any> = number & { _b: "Vow", _t: T, _e: E }
 export type Executor = (id: Vow) -> ()
-export type Handler = ((value: any) -> any)?
+export type Handler<T = any, U = any> = ((value: T) -> U)?
 export type VowStats = {
 	vowCapacity: number,
 	vowLive: number,
@@ -221,7 +223,7 @@ local function growNodesTo(newCapacity: number)
 
 	local newResolved = table.create(newCapacity) :: { ((value: any) -> any)? }
 	local newRejected = table.create(newCapacity) :: { ((value: any) -> any)? }
-	local newChildren = table.create(newCapacity) :: { number? }
+	local newChildren = table.create(newCapacity) :: { Vow? }
 	local newThreads = table.create(newCapacity) :: { thread? }
 
 	table.move(nodeResolved, 1, nodeCapacity, 1, newResolved)
@@ -262,7 +264,7 @@ local function acquireVow(): (number, Vow)
 	buffer.writeu8(vowStates, id, STATE_PENDING)
 
 	local generation = buffer.readu32(vowGens, id * 4)
-	return id, id + (generation + 1) * SLOT_ID_SPACE
+	return id, id + (generation + 1) * SLOT_ID_SPACE :: any
 end
 
 local function releaseVow(id: number): ()
@@ -365,7 +367,7 @@ local function tryDecode(handle: any): number?
 end
 
 local function handleOf(id: number): Vow
-	return id + (buffer.readu32(vowGens, id * 4) + 1) * SLOT_ID_SPACE
+	return id + (buffer.readu32(vowGens, id * 4) + 1) * SLOT_ID_SPACE :: any
 end
 
 local function appendSource(source: number, node: number): ()
@@ -748,7 +750,7 @@ local function validateInputs(vows: { Vow }, method: string): ({ Vow }, number)
 
 	local snapshot = table.create(count) :: { Vow }
 	for index = 1, count do
-		snapshot[index] = rawget(vows, index)
+		snapshot[index] = rawget(vows :: any, index)
 	end
 
 	return snapshot, count
@@ -799,7 +801,7 @@ end
 	@param value any -- the single fulfillment value or another Vow
 ]=]
 @native
-function Vow.resolve(id: Vow, value: any): ()
+function Vow.resolve<T>(id: Vow<T>, value: T | Vow): ()
 	local slot = decode(id, "resolve")
 	resolveValue(slot, value)
 end
@@ -812,7 +814,7 @@ end
 	@param value any -- the raw fulfillment value
 ]=]
 @native
-function Vow.resolveRaw(id: Vow, value: any): ()
+function Vow.resolveRaw<T>(id: Vow<T>, value: T): ()
 	local slot = decode(id, "resolveRaw")
 
 	if buffer.readu8(vowStates, slot) ~= STATE_PENDING then return end
@@ -832,7 +834,7 @@ end
 	@param value any -- the single rejection value
 ]=]
 @native
-function Vow.reject(id: Vow, value: any): ()
+function Vow.reject<_, E>(id: Vow<_, E>, value: E): ()
 	local slot = decode(id, "reject")
 
 	if buffer.readu8(vowStates, slot) ~= STATE_PENDING then return end
@@ -855,7 +857,7 @@ end
 	@return Vow -- a new child Vow handle
 ]=]
 @native
-function Vow.andThen(id: Vow, onResolved: Handler, onRejected: Handler): Vow
+function Vow.andThen<T, E, R, R_e>(id: Vow<T, E>, onResolved: Handler<T, R>?, onRejected: Handler<E, R_e>?): Vow<R | R_e>
 	local parent = decode(id, "andThen")
 
 	if onResolved ~= nil and type(onResolved) ~= "function" then error("Vow.andThen: onResolved must be a function or nil", 2) end
@@ -889,7 +891,7 @@ end
 	@return Vow -- a new child Vow handle
 ]=]
 @native
-function Vow.catch(id: Vow, onRejected: (value: any) -> any): Vow
+function Vow.catch<_, E, R_e>(id: Vow, onRejected: (value: E) -> R_e): Vow<R_e>
 	if type(onRejected) ~= "function" then error("Vow.catch: onRejected must be a function", 2) end
 
 	return Vow.andThen(id, nil, onRejected)
@@ -906,7 +908,7 @@ end
 	@return boolean -- true when resolved, false otherwise
 	@return any -- the fulfillment or rejection value
 ]=]
-function Vow.await(id: Vow): (boolean, any)
+function Vow.await<T>(id: Vow<T>): (boolean, T?) -- Using same type semantics as pcall
 	local slot = decode(id, "await")
 	local state = buffer.readu8(vowStates, slot)
 
@@ -978,7 +980,7 @@ end
 	@param vows {Vow} -- input Vow handles
 	@return Vow -- aggregate Vow
 ]=]
-function Vow.all(vows: { Vow }): Vow
+function Vow.all<T, E>(vows: { Vow<T, E> }): Vow<{ [number]: T, n: number }, E>
 	local snapshot, count = validateInputs(vows, "all")
 
 	local parent, result = acquireVow()
@@ -1030,7 +1032,7 @@ end
 	@param vows {Vow} -- input Vow handles
 	@return Vow -- race Vow
 ]=]
-function Vow.race(vows: { Vow }): Vow
+function Vow.race<T, E>(vows: { Vow<T, E> }): Vow<T, E>
 	local snapshot, count = validateInputs(vows, "race")
 
 	local parent, result = acquireVow()
