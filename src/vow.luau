@@ -929,6 +929,32 @@ function Vow.await<T>(id: Vow<T>): (boolean, T?) -- Using same type semantics as
 end
 
 --[=[
+	Functions like await, but raises an error if the Vow is rejected or cancelled.
+
+	@param id Vow -- the Vow handle to await
+	@return any -- the fulfillment or rejection value
+]=]
+function Vow.expect<T>(id: Vow<T>): T
+	local slot = decode(id, "await")
+	local state = buffer.readu8(vowStates, slot)
+
+	if state == STATE_RESOLVED then
+		return vowValues[slot + 1]
+	elseif state == STATE_REJECTED then
+		buffer.writeu8(vowHandled, slot, 1)
+		error(`Vow.expect: Vow was rejected with error value: {vowValues[slot + 1]}`, 2)
+	elseif state == STATE_CANCELLED then
+		error("Vow.expect: Vow was cancelled", 2)
+	end
+
+	if not coroutine.isyieldable() then error("Vow.expect: cannot expect in a non-yieldable thread", 2) end
+
+	makeNode(NODE_AWAIT, slot, nil, 0, nil, nil, nil, coroutine.running())
+
+	return coroutine.yield()
+end
+
+--[=[
 	Cancels a pending Vow.
 
 	Cancellation is silent, wakes awaiters with (false, nil), recursively
