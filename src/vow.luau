@@ -78,26 +78,26 @@ export type VowStats = {
 
 -- ============================== tunables ================================
 
-local INITIAL_VOWS = 64
-local INITIAL_NODES = 128
+const INITIAL_VOWS = 64
+const INITIAL_NODES = 128
 
-local SLOT_ID_SPACE = 16_777_216
-local GENERATION_SPACE = 268_435_456
-local MAX_HANDLE = GENERATION_SPACE * SLOT_ID_SPACE + (SLOT_ID_SPACE - 1)
-local MAX_NODES = 268_435_455
+const SLOT_ID_SPACE = 16_777_216
+const GENERATION_SPACE = 268_435_456
+const MAX_HANDLE = GENERATION_SPACE * SLOT_ID_SPACE + (SLOT_ID_SPACE - 1)
+const MAX_NODES = 268_435_455
 
-local STATE_PENDING = 1
-local STATE_RESOLVED = 2
-local STATE_REJECTED = 4
-local STATE_CANCELLED = 8
+const STATE_PENDING = 1
+const STATE_RESOLVED = 2
+const STATE_REJECTED = 4
+const STATE_CANCELLED = 8
 
-local NODE_CALLBACK = 1
-local NODE_AWAIT = 2
-local NODE_ADOPT = 3
-local NODE_AGGREGATE = 4
+const NODE_CALLBACK = 1
+const NODE_AWAIT = 2
+const NODE_ADOPT = 3
+const NODE_AGGREGATE = 4
 
-local AGG_ALL = 1
-local AGG_RACE = 2
+const AGG_ALL = 1
+const AGG_RACE = 2
 
 -- ============================== Vow SoA =================================
 
@@ -155,21 +155,21 @@ local cancelInternal: (handle: Vow) -> ()
 local destroyInternal: (id: number) -> ()
 local resolveValue: (id: number, value: any) -> ()
 
-local function growU8(source: buffer, oldCount: number, newCount: number): buffer
-	local result = buffer.create(newCount)
+const function growU8(source: buffer, oldCount: number, newCount: number): buffer
+	const result = buffer.create(newCount)
 	buffer.copy(result, 0, source, 0, oldCount)
 	return result
 end
 
-local function growU32(source: buffer, oldCount: number, newCount: number): buffer
-	local result = buffer.create(newCount * 4)
+const function growU32(source: buffer, oldCount: number, newCount: number): buffer
+	const result = buffer.create(newCount * 4)
 	buffer.copy(result, 0, source, 0, oldCount * 4)
 	return result
 end
 
-local function pushVow(id: number): ()
+const function pushVow(id: number): ()
 	if vowFreeLength >= vowFreeCapacity then
-		local newCapacity = vowFreeCapacity * 2
+		const newCapacity = vowFreeCapacity * 2
 		vowFree = growU32(vowFree, vowFreeCapacity, newCapacity)
 		vowFreeCapacity = newCapacity
 	end
@@ -178,9 +178,9 @@ local function pushVow(id: number): ()
 	vowFreeLength += 1
 end
 
-local function pushNode(id: number): ()
+const function pushNode(id: number): ()
 	if nodeFreeLength >= nodeFreeCapacity then
-		local newCapacity = nodeFreeCapacity * 2
+		const newCapacity = nodeFreeCapacity * 2
 		nodeFree = growU32(nodeFree, nodeFreeCapacity, newCapacity)
 		nodeFreeCapacity = newCapacity
 	end
@@ -189,7 +189,7 @@ local function pushNode(id: number): ()
 	nodeFreeLength += 1
 end
 
-local function growVowsTo(newCapacity: number)
+const function growVowsTo(newCapacity: number)
 	vowGens = growU32(vowGens, vowCapacity, newCapacity)
 	vowStates = growU8(vowStates, vowCapacity, newCapacity)
 	vowHeads = growU32(vowHeads, vowCapacity, newCapacity)
@@ -201,8 +201,8 @@ local function growVowsTo(newCapacity: number)
 	vowAggregateRemaining = growU32(vowAggregateRemaining, vowCapacity, newCapacity)
 	vowAdopts = growU32(vowAdopts, vowCapacity, newCapacity)
 
-	local newValues = table.create(newCapacity) :: { any }
-	local newAggResults = table.create(newCapacity) :: { { any }? }
+	const newValues = table.create(newCapacity) :: { any }
+	const newAggResults = table.create(newCapacity) :: { { any }? }
 	table.move(vowValues, 1, vowCapacity, 1, newValues)
 	table.move(vowAggregateResults, 1, vowCapacity, 1, newAggResults)
 	vowValues = newValues
@@ -211,7 +211,7 @@ local function growVowsTo(newCapacity: number)
 	vowCapacity = newCapacity
 end
 
-local function growNodesTo(newCapacity: number)
+const function growNodesTo(newCapacity: number)
 	nodeKinds = growU8(nodeKinds, nodeCapacity, newCapacity)
 	nodeNext = growU32(nodeNext, nodeCapacity, newCapacity)
 	nodePrevious = growU32(nodePrevious, nodeCapacity, newCapacity)
@@ -221,10 +221,10 @@ local function growNodesTo(newCapacity: number)
 	nodeOwners = growU32(nodeOwners, nodeCapacity, newCapacity)
 	nodeIndices = growU32(nodeIndices, nodeCapacity, newCapacity)
 
-	local newResolved = table.create(newCapacity) :: { ((value: any) -> any)? }
-	local newRejected = table.create(newCapacity) :: { ((value: any) -> any)? }
-	local newChildren = table.create(newCapacity) :: { Vow? }
-	local newThreads = table.create(newCapacity) :: { thread? }
+	const newResolved = table.create(newCapacity) :: { ((value: any) -> any)? }
+	const newRejected = table.create(newCapacity) :: { ((value: any) -> any)? }
+	const newChildren = table.create(newCapacity) :: { Vow? }
+	const newThreads = table.create(newCapacity) :: { thread? }
 
 	table.move(nodeResolved, 1, nodeCapacity, 1, newResolved)
 	table.move(nodeRejected, 1, nodeCapacity, 1, newRejected)
@@ -239,14 +239,14 @@ local function growNodesTo(newCapacity: number)
 	nodeCapacity = newCapacity
 end
 
-local function growVows()
+const function growVows()
 	growVowsTo(vowCapacity * 2)
 end
-local function growNodes()
+const function growNodes()
 	growNodesTo(nodeCapacity * 2)
 end
 
-local function acquireVow(): (number, Vow)
+const function acquireVow(): (number, Vow)
 	local id: number
 
 	if vowFreeLength > 0 then
@@ -263,12 +263,12 @@ local function acquireVow(): (number, Vow)
 
 	buffer.writeu8(vowStates, id, STATE_PENDING)
 
-	local generation = buffer.readu32(vowGens, id * 4)
+	const generation = buffer.readu32(vowGens, id * 4)
 	return id, id + (generation + 1) * SLOT_ID_SPACE :: any
 end
 
-local function releaseVow(id: number): ()
-	local generation = buffer.readu32(vowGens, id * 4) + 1
+const function releaseVow(id: number): ()
+	const generation = buffer.readu32(vowGens, id * 4) + 1
 
 	vowValues[id + 1] = nil
 	vowAggregateResults[id + 1] = nil
@@ -294,7 +294,7 @@ local function releaseVow(id: number): ()
 	pushVow(id)
 end
 
-local function acquireNode(): number
+const function acquireNode(): number
 	local id: number
 
 	if nodeFreeLength > 0 then
@@ -312,8 +312,8 @@ local function acquireNode(): number
 	return id
 end
 
-local function releaseNode(id: number): ()
-	local slot = id + 1
+const function releaseNode(id: number): ()
+	const slot = id + 1
 
 	buffer.writeu8(nodeKinds, id, 0)
 	buffer.writeu32(nodeNext, id * 4, 0)
@@ -332,13 +332,13 @@ local function releaseNode(id: number): ()
 	pushNode(id)
 end
 
-local function decode(handle: Vow, method: string): number
+const function decode(handle: Vow, method: string): number
 	if type(handle) ~= "number" then error(`Vow.{method}: expected a Vow handle`, 3) end
 
 	if handle ~= handle or handle < SLOT_ID_SPACE or handle > MAX_HANDLE or handle % 1 ~= 0 then error(`Vow.{method}: invalid Vow handle`, 3) end
 
-	local id = handle % SLOT_ID_SPACE
-	local generation = (handle - id) // SLOT_ID_SPACE - 1
+	const id = handle % SLOT_ID_SPACE
+	const generation = (handle - id) // SLOT_ID_SPACE - 1
 
 	if id >= vowCount then error(`Vow.{method}: handle references an unallocated slot`, 3) end
 
@@ -349,13 +349,13 @@ local function decode(handle: Vow, method: string): number
 	return id
 end
 
-local function tryDecode(handle: any): number?
+const function tryDecode(handle: any): number?
 	if type(handle) ~= "number" then return nil end
 
 	if handle ~= handle or handle < SLOT_ID_SPACE or handle > MAX_HANDLE or handle % 1 ~= 0 then return nil end
 
-	local id = handle % SLOT_ID_SPACE
-	local generation = (handle - id) // SLOT_ID_SPACE - 1
+	const id = handle % SLOT_ID_SPACE
+	const generation = (handle - id) // SLOT_ID_SPACE - 1
 
 	if id >= vowCount then return nil end
 
@@ -366,13 +366,13 @@ local function tryDecode(handle: any): number?
 	return id
 end
 
-local function handleOf(id: number): Vow
+const function handleOf(id: number): Vow
 	return id + (buffer.readu32(vowGens, id * 4) + 1) * SLOT_ID_SPACE :: any
 end
 
-local function appendSource(source: number, node: number): ()
-	local sourceOffset = source * 4
-	local tail = buffer.readu32(vowTails, sourceOffset)
+const function appendSource(source: number, node: number): ()
+	const sourceOffset = source * 4
+	const tail = buffer.readu32(vowTails, sourceOffset)
 
 	buffer.writeu32(nodeSources, node * 4, source + 1)
 	buffer.writeu32(nodePrevious, node * 4, tail)
@@ -387,9 +387,9 @@ local function appendSource(source: number, node: number): ()
 	buffer.writeu32(vowTails, sourceOffset, node + 1)
 end
 
-local function appendOwner(owner: number, node: number): ()
-	local ownerOffset = owner * 4
-	local tail = buffer.readu32(vowOwnedTails, ownerOffset)
+const function appendOwner(owner: number, node: number): ()
+	const ownerOffset = owner * 4
+	const tail = buffer.readu32(vowOwnedTails, ownerOffset)
 
 	buffer.writeu32(nodeOwners, node * 4, owner + 1)
 	buffer.writeu32(nodeOwnerPrevious, node * 4, tail)
@@ -404,15 +404,15 @@ local function appendOwner(owner: number, node: number): ()
 	buffer.writeu32(vowOwnedTails, ownerOffset, node + 1)
 end
 
-local function unlinkSource(node: number): ()
-	local encodedSource = buffer.readu32(nodeSources, node * 4)
+const function unlinkSource(node: number): ()
+	const encodedSource = buffer.readu32(nodeSources, node * 4)
 
 	if encodedSource == 0 then return end
 
-	local source = encodedSource - 1
-	local sourceOffset = source * 4
-	local previous = buffer.readu32(nodePrevious, node * 4)
-	local nextNode = buffer.readu32(nodeNext, node * 4)
+	const source = encodedSource - 1
+	const sourceOffset = source * 4
+	const previous = buffer.readu32(nodePrevious, node * 4)
+	const nextNode = buffer.readu32(nodeNext, node * 4)
 
 	if previous == 0 then
 		buffer.writeu32(vowHeads, sourceOffset, nextNode)
@@ -431,15 +431,15 @@ local function unlinkSource(node: number): ()
 	buffer.writeu32(nodeNext, node * 4, 0)
 end
 
-local function unlinkOwner(node: number): ()
-	local encodedOwner = buffer.readu32(nodeOwners, node * 4)
+const function unlinkOwner(node: number): ()
+	const encodedOwner = buffer.readu32(nodeOwners, node * 4)
 
 	if encodedOwner == 0 then return end
 
-	local owner = encodedOwner - 1
-	local ownerOffset = owner * 4
-	local previous = buffer.readu32(nodeOwnerPrevious, node * 4)
-	local nextNode = buffer.readu32(nodeOwnerNext, node * 4)
+	const owner = encodedOwner - 1
+	const ownerOffset = owner * 4
+	const previous = buffer.readu32(nodeOwnerPrevious, node * 4)
+	const nextNode = buffer.readu32(nodeOwnerNext, node * 4)
 
 	if previous == 0 then
 		buffer.writeu32(vowOwnedHeads, ownerOffset, nextNode)
@@ -458,18 +458,18 @@ local function unlinkOwner(node: number): ()
 	buffer.writeu32(nodeOwnerNext, node * 4, 0)
 end
 
-local function popSourceHead(source: number): number?
-	local encoded = buffer.readu32(vowHeads, source * 4)
+const function popSourceHead(source: number): number?
+	const encoded = buffer.readu32(vowHeads, source * 4)
 	if encoded == 0 then return nil end
 
-	local node = encoded - 1
+	const node = encoded - 1
 	unlinkSource(node)
 	return node
 end
 
-local function makeNode(kind: number, source: number, owner: number?, index: number, resolved: Handler, rejected: Handler, child: Vow?, thread: thread?): number
-	local node = acquireNode()
-	local slot = node + 1
+const function makeNode(kind: number, source: number, owner: number?, index: number, resolved: Handler, rejected: Handler, child: Vow?, thread: thread?): number
+	const node = acquireNode()
+	const slot = node + 1
 
 	buffer.writeu8(nodeKinds, node, kind)
 	buffer.writeu32(nodeIndices, node * 4, index)
@@ -486,14 +486,14 @@ local function makeNode(kind: number, source: number, owner: number?, index: num
 	return node
 end
 
-local function detachOwned(owner: number): ()
+const function detachOwned(owner: number): ()
 	local head = buffer.readu32(vowOwnedHeads, owner * 4)
 
 	buffer.writeu32(vowOwnedHeads, owner * 4, 0)
 	buffer.writeu32(vowOwnedTails, owner * 4, 0)
 
 	while head ~= 0 do
-		local node = head - 1
+		const node = head - 1
 		head = buffer.readu32(nodeOwnerNext, node * 4)
 
 		buffer.writeu32(nodeOwners, node * 4, 0)
@@ -505,12 +505,12 @@ local function detachOwned(owner: number): ()
 	end
 end
 
-local function aggregateStep(parent: Vow, state: number, value: any, index: number): ()
-	local parentId = tryDecode(parent)
+const function aggregateStep(parent: Vow, state: number, value: any, index: number): ()
+	const parentId = tryDecode(parent)
 
 	if parentId == nil or buffer.readu8(vowStates, parentId) ~= STATE_PENDING then return end
 
-	local mode = buffer.readu8(vowAggregateModes, parentId)
+	const mode = buffer.readu8(vowAggregateModes, parentId)
 
 	if mode == AGG_RACE then
 		settle(parentId, state, value)
@@ -524,21 +524,21 @@ local function aggregateStep(parent: Vow, state: number, value: any, index: numb
 		return
 	end
 
-	local results = vowAggregateResults[parentId + 1]
+	const results = vowAggregateResults[parentId + 1]
 
 	if results ~= nil then results[index] = value end
 
-	local remaining = buffer.readu32(vowAggregateRemaining, parentId * 4) - 1
+	const remaining = buffer.readu32(vowAggregateRemaining, parentId * 4) - 1
 	buffer.writeu32(vowAggregateRemaining, parentId * 4, remaining)
 
 	if remaining == 0 then settle(parentId, STATE_RESOLVED, results) end
 end
 
-local function invokeCallback(callback: Handler, value: any, child: Vow, rejected: boolean): ()
+const function invokeCallback(callback: Handler, value: any, child: Vow, rejected: boolean): ()
 	if tryDecode(child) == nil then return end
 
 	if callback == nil then
-		local childId = tryDecode(child)
+		const childId = tryDecode(child)
 		if childId == nil then return end
 
 		if rejected then
@@ -549,8 +549,8 @@ local function invokeCallback(callback: Handler, value: any, child: Vow, rejecte
 		return
 	end
 
-	local ok, result = pcall(callback :: (any) -> any, value)
-	local childId = tryDecode(child)
+	const ok, result = pcall(callback :: (any) -> any, value)
+	const childId = tryDecode(child)
 
 	if childId == nil then return end
 
@@ -561,20 +561,20 @@ local function invokeCallback(callback: Handler, value: any, child: Vow, rejecte
 	end
 end
 
-local function dispatch(id: number, state: number, value: any): ()
-	local rejected = state == STATE_REJECTED
-	local childState = if rejected then STATE_REJECTED else STATE_RESOLVED
+const function dispatch(id: number, state: number, value: any): ()
+	const rejected = state == STATE_REJECTED
+	const childState = if rejected then STATE_REJECTED else STATE_RESOLVED
 
 	while true do
-		local node = popSourceHead(id)
+		const node = popSourceHead(id)
 		if node == nil then break end
 
-		local slot = node + 1
-		local kind = buffer.readu8(nodeKinds, node)
-		local index = buffer.readu32(nodeIndices, node * 4)
-		local child = nodeChildren[slot]
-		local waiting = nodeThreads[slot]
-		local callback = if rejected then nodeRejected[slot] else nodeResolved[slot]
+		const slot = node + 1
+		const kind = buffer.readu8(nodeKinds, node)
+		const index = buffer.readu32(nodeIndices, node * 4)
+		const child = nodeChildren[slot]
+		const waiting = nodeThreads[slot]
+		const callback = if rejected then nodeRejected[slot] else nodeResolved[slot]
 
 		unlinkOwner(node)
 		releaseNode(node)
@@ -585,7 +585,7 @@ local function dispatch(id: number, state: number, value: any): ()
 			if child ~= nil then invokeCallback(callback, value, child, rejected) end
 		elseif kind == NODE_ADOPT then
 			if child ~= nil then
-				local childId = tryDecode(child)
+				const childId = tryDecode(child)
 				if childId ~= nil then settle(childId, childState, value) end
 			end
 		elseif kind == NODE_AWAIT then
@@ -596,8 +596,8 @@ local function dispatch(id: number, state: number, value: any): ()
 	end
 end
 
-local function raiseUnhandled(handle: Vow): ()
-	local id = tryDecode(handle)
+const function raiseUnhandled(handle: Vow): ()
+	const id = tryDecode(handle)
 
 	if id == nil then return end
 
@@ -607,7 +607,7 @@ end
 settle = function(id: number, state: number, value: any): ()
 	if buffer.readu8(vowStates, id) ~= STATE_PENDING then return end
 
-	local handle = handleOf(id)
+	const handle = handleOf(id)
 
 	buffer.writeu8(vowStates, id, state)
 	buffer.writeu32(vowAdopts, id * 4, 0)
@@ -620,7 +620,7 @@ settle = function(id: number, state: number, value: any): ()
 end
 
 cancelInternal = function(handle: Vow): ()
-	local id = tryDecode(handle)
+	const id = tryDecode(handle)
 
 	if id == nil or buffer.readu8(vowStates, id) ~= STATE_PENDING then return end
 
@@ -630,13 +630,13 @@ cancelInternal = function(handle: Vow): ()
 	detachOwned(id)
 
 	while true do
-		local node = popSourceHead(id)
+		const node = popSourceHead(id)
 		if node == nil then break end
 
-		local slot = node + 1
-		local kind = buffer.readu8(nodeKinds, node)
-		local child = nodeChildren[slot]
-		local waiting = nodeThreads[slot]
+		const slot = node + 1
+		const kind = buffer.readu8(nodeKinds, node)
+		const child = nodeChildren[slot]
+		const waiting = nodeThreads[slot]
 
 		unlinkOwner(node)
 		releaseNode(node)
@@ -653,12 +653,12 @@ destroyInternal = function(id: number): ()
 	detachOwned(id)
 
 	while true do
-		local node = popSourceHead(id)
+		const node = popSourceHead(id)
 		if node == nil then break end
 
-		local slot = node + 1
-		local kind = buffer.readu8(nodeKinds, node)
-		local waiting = nodeThreads[slot]
+		const slot = node + 1
+		const kind = buffer.readu8(nodeKinds, node)
+		const waiting = nodeThreads[slot]
 
 		unlinkOwner(node)
 		releaseNode(node)
@@ -671,20 +671,20 @@ destroyInternal = function(id: number): ()
 	releaseVow(id)
 end
 
-local function isAdoptionCycle(id: number, adopted: number): boolean
+const function isAdoptionCycle(id: number, adopted: number): boolean
 	local tortoise = adopted
 	local hare = adopted
 
 	while true do
 		if hare == id then return true end
 
-		local enc1 = buffer.readu32(vowAdopts, hare * 4)
+		const enc1 = buffer.readu32(vowAdopts, hare * 4)
 		if enc1 == 0 then return false end
 		hare = enc1 - 1
 
 		if hare == id then return true end
 
-		local enc2 = buffer.readu32(vowAdopts, hare * 4)
+		const enc2 = buffer.readu32(vowAdopts, hare * 4)
 		if enc2 == 0 then return false end
 		hare = enc2 - 1
 
@@ -699,7 +699,7 @@ resolveValue = function(id: number, value: any): ()
 
 	if buffer.readu32(vowAdopts, id * 4) ~= 0 then return end
 
-	local adopted = tryDecode(value)
+	const adopted = tryDecode(value)
 
 	if adopted == nil then
 		settle(id, STATE_RESOLVED, value)
@@ -716,7 +716,7 @@ resolveValue = function(id: number, value: any): ()
 		return
 	end
 
-	local state = buffer.readu8(vowStates, adopted)
+	const state = buffer.readu8(vowStates, adopted)
 
 	if state == STATE_PENDING then
 		buffer.writeu32(vowAdopts, id * 4, adopted + 1)
@@ -731,7 +731,7 @@ resolveValue = function(id: number, value: any): ()
 	end
 end
 
-local function validateInputs(vows: { Vow }, method: string): ({ Vow }, number)
+const function validateInputs(vows: { Vow }, method: string): ({ Vow }, number)
 	if type(vows) ~= "table" then error(`Vow.{method}: expected an array of Vow handles`, 3) end
 
 	local count = 0
@@ -748,7 +748,7 @@ local function validateInputs(vows: { Vow }, method: string): ({ Vow }, number)
 
 	if count ~= maxIndex then error(`Vow.{method}: sparse arrays are not allowed`, 3) end
 
-	local snapshot = table.create(count) :: { Vow }
+	const snapshot = table.create(count) :: { Vow }
 	for index = 1, count do
 		snapshot[index] = rawget(vows :: any, index)
 	end
@@ -758,7 +758,7 @@ end
 
 -- ================================= API ==================================
 
-local Vow = {}
+const Vow = {}
 
 --[=[
 	Creates a pending Vow and passes its integer handle to the executor.
@@ -776,11 +776,11 @@ function Vow.new(executor: Executor): Vow
 	if type(executor) ~= "function" then error("Vow.new: executor must be a function", 2) end
 
 	-- Since the executor may yield, using the id may be unsafe, so tryDecode is used instead
-	local _, handle = acquireVow()
-	local ok, err = pcall(executor, handle)
+	const _, handle = acquireVow()
+	const ok, err = pcall(executor, handle)
 
 	if not ok then
-		local currentId = tryDecode(handle)
+		const currentId = tryDecode(handle)
 		if currentId ~= nil and buffer.readu8(vowStates, currentId) == STATE_PENDING and buffer.readu32(vowAdopts, currentId * 4) == 0 then
 			settle(currentId, STATE_REJECTED, err)
 		end
@@ -802,7 +802,7 @@ end
 ]=]
 @native
 function Vow.resolve<T>(id: Vow<T>, value: T | Vow): ()
-	local slot = decode(id, "resolve")
+	const slot = decode(id, "resolve")
 	resolveValue(slot, value)
 end
 
@@ -815,7 +815,7 @@ end
 ]=]
 @native
 function Vow.resolveRaw<T>(id: Vow<T>, value: T): ()
-	local slot = decode(id, "resolveRaw")
+	const slot = decode(id, "resolveRaw")
 
 	if buffer.readu8(vowStates, slot) ~= STATE_PENDING then return end
 
@@ -835,7 +835,7 @@ end
 ]=]
 @native
 function Vow.reject<_, E>(id: Vow<_, E>, value: E): ()
-	local slot = decode(id, "reject")
+	const slot = decode(id, "reject")
 
 	if buffer.readu8(vowStates, slot) ~= STATE_PENDING then return end
 
@@ -858,14 +858,14 @@ end
 ]=]
 @native
 function Vow.andThen<T, E, R, R_e>(id: Vow<T, E>, onResolved: Handler<T, R>?, onRejected: Handler<E, R_e>?): Vow<R | R_e>
-	local parent = decode(id, "andThen")
+	const parent = decode(id, "andThen")
 
 	if onResolved ~= nil and type(onResolved) ~= "function" then error("Vow.andThen: onResolved must be a function or nil", 2) end
 
 	if onRejected ~= nil and type(onRejected) ~= "function" then error("Vow.andThen: onRejected must be a function or nil", 2) end
 
-	local childId, child = acquireVow()
-	local state = buffer.readu8(vowStates, parent)
+	const childId, child = acquireVow()
+	const state = buffer.readu8(vowStates, parent)
 
 	if state == STATE_PENDING then
 		makeNode(NODE_CALLBACK, parent, childId, 0, onResolved, onRejected, child, nil)
@@ -909,8 +909,8 @@ end
 	@return any -- the fulfillment or rejection value
 ]=]
 function Vow.await<T>(id: Vow<T>): (boolean, T?) -- Using same type semantics as pcall
-	local slot = decode(id, "await")
-	local state = buffer.readu8(vowStates, slot)
+	const slot = decode(id, "await")
+	const state = buffer.readu8(vowStates, slot)
 
 	if state == STATE_RESOLVED then
 		return true, vowValues[slot + 1]
@@ -935,8 +935,8 @@ end
 	@return any -- the fulfillment or rejection value
 ]=]
 function Vow.expect<T>(id: Vow<T>): T
-	local slot = decode(id, "await")
-	local state = buffer.readu8(vowStates, slot)
+	const slot = decode(id, "await")
+	const state = buffer.readu8(vowStates, slot)
 
 	if state == STATE_RESOLVED then
 		return vowValues[slot + 1]
@@ -1007,10 +1007,10 @@ end
 	@return Vow -- aggregate Vow
 ]=]
 function Vow.all<T, E>(vows: { Vow<T, E> }): Vow<{ [number]: T, n: number }, E>
-	local snapshot, count = validateInputs(vows, "all")
+	const snapshot, count = validateInputs(vows, "all")
 
-	local parent, result = acquireVow()
-	local results = table.create(count) :: any
+	const parent, result = acquireVow()
+	const results = table.create(count) :: any
 	results.n = count
 
 	vowAggregateResults[parent + 1] = results
@@ -1023,11 +1023,11 @@ function Vow.all<T, E>(vows: { Vow<T, E> }): Vow<{ [number]: T, n: number }, E>
 	end
 
 	for index = 1, count do
-		local inputId = tryDecode(snapshot[index])
+		const inputId = tryDecode(snapshot[index])
 
 		if inputId == nil then continue end
 
-		local state = buffer.readu8(vowStates, inputId)
+		const state = buffer.readu8(vowStates, inputId)
 
 		if state == STATE_PENDING then
 			makeNode(NODE_AGGREGATE, inputId, parent, index, nil, nil, result, nil)
@@ -1059,18 +1059,18 @@ end
 	@return Vow -- race Vow
 ]=]
 function Vow.race<T, E>(vows: { Vow<T, E> }): Vow<T, E>
-	local snapshot, count = validateInputs(vows, "race")
+	const snapshot, count = validateInputs(vows, "race")
 
-	local parent, result = acquireVow()
+	const parent, result = acquireVow()
 
 	buffer.writeu8(vowAggregateModes, parent, AGG_RACE)
 
 	for index = 1, count do
-		local inputId = tryDecode(snapshot[index])
+		const inputId = tryDecode(snapshot[index])
 
 		if inputId == nil then continue end
 
-		local state = buffer.readu8(vowStates, inputId)
+		const state = buffer.readu8(vowStates, inputId)
 
 		if state == STATE_PENDING then
 			makeNode(NODE_AGGREGATE, inputId, parent, index, nil, nil, result, nil)
