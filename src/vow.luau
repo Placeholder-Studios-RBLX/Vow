@@ -95,6 +95,7 @@ const NODE_CALLBACK = 1
 const NODE_AWAIT = 2
 const NODE_ADOPT = 3
 const NODE_AGGREGATE = 4
+const NODE_FINALLY = 5
 
 const AGG_ALL = 1
 const AGG_RACE = 2
@@ -140,6 +141,7 @@ local nodeResolved = table.create(INITIAL_NODES) :: { Handler }
 local nodeRejected = table.create(INITIAL_NODES) :: { Handler }
 local nodeChildren = table.create(INITIAL_NODES) :: { Vow? }
 local nodeThreads = table.create(INITIAL_NODES) :: { thread? }
+local nodeFinally = table.create(INITIAL_NODES) :: { ((ok: boolean, value: any) -> ())? }
 
 local nodeCount = 0
 local nodeCapacity = INITIAL_NODES
@@ -151,7 +153,7 @@ local nodeFreeCapacity = INITIAL_NODES
 -- ============================== internals ================================
 
 local settle: (id: number, state: number, value: any) -> ()
-local cancelInternal: (handle: Vow) -> ()
+local cancelInternal: (handle: Vow, fireFinally: boolean) -> ()
 local destroyInternal: (id: number) -> ()
 local resolveValue: (id: number, value: any) -> ()
 
@@ -225,16 +227,19 @@ const function growNodesTo(newCapacity: number)
 	const newRejected = table.create(newCapacity) :: { ((value: any) -> any)? }
 	const newChildren = table.create(newCapacity) :: { Vow? }
 	const newThreads = table.create(newCapacity) :: { thread? }
+	const newFinally = table.create(newCapacity) :: { ((ok: boolean, value: any) -> ())? }
 
 	table.move(nodeResolved, 1, nodeCapacity, 1, newResolved)
 	table.move(nodeRejected, 1, nodeCapacity, 1, newRejected)
 	table.move(nodeChildren, 1, nodeCapacity, 1, newChildren)
 	table.move(nodeThreads, 1, nodeCapacity, 1, newThreads)
+	table.move(nodeFinally, 1, nodeCapacity, 1, newFinally)
 
 	nodeResolved = newResolved
 	nodeRejected = newRejected
 	nodeChildren = newChildren
 	nodeThreads = newThreads
+	nodeFinally = newFinally
 
 	nodeCapacity = newCapacity
 end
@@ -328,6 +333,7 @@ const function releaseNode(id: number): ()
 	nodeRejected[slot] = nil
 	nodeChildren[slot] = nil
 	nodeThreads[slot] = nil
+	nodeFinally[slot] = nil
 
 	pushNode(id)
 end
@@ -486,6 +492,15 @@ const function makeNode(kind: number, source: number, owner: number?, index: num
 	return node
 end
 
+const function makeFinallyNode(source: number, callback: (ok: boolean, value: any) -> ()): number
+	local node = acquireNode()
+	local slot = node + 1
+	buffer.writeu8(nodeKinds, node, NODE_FINALLY)
+	nodeFinally[slot] = callback
+	appendSource(source, node)
+	return node
+end
+
 const function detachOwned(owner: number): ()
 	local head = buffer.readu32(vowOwnedHeads, owner * 4)
 
@@ -564,6 +579,7 @@ end
 const function dispatch(id: number, state: number, value: any): ()
 	const rejected = state == STATE_REJECTED
 	const childState = if rejected then STATE_REJECTED else STATE_RESOLVED
+	const handle = handleOf(id)
 
 	while true do
 		const node = popSourceHead(id)
@@ -575,6 +591,7 @@ const function dispatch(id: number, state: number, value: any): ()
 		const child = nodeChildren[slot]
 		const waiting = nodeThreads[slot]
 		const callback = if rejected then nodeRejected[slot] else nodeResolved[slot]
+		const finalCb = if kind == NODE_FINALLY then nodeFinally[slot] else nil
 
 		unlinkOwner(node)
 		releaseNode(node)
@@ -592,7 +609,15 @@ const function dispatch(id: number, state: number, value: any): ()
 			if waiting ~= nil then task.spawn(waiting, not rejected, value) end
 		elseif kind == NODE_AGGREGATE then
 			if child ~= nil then aggregateStep(child, childState, value, index) end
+		elseif kind == NODE_FINALLY then
+			if finalCb ~= nil then
+				const ok, err = pcall(finalCb, not rejected, value)
+				if not ok then task.defer(error, err, 0) end
+			end
 		end
+
+		-- Bail if a callback destroyed or recycled this Vow
+		if tryDecode(handle) == nil then return end
 	end
 end
 
@@ -619,7 +644,7 @@ settle = function(id: number, state: number, value: any): ()
 	if state == STATE_REJECTED then task.defer(raiseUnhandled, handle) end
 end
 
-cancelInternal = function(handle: Vow): ()
+cancelInternal = function(handle: Vow, fireFinally: boolean): ()
 	const id = tryDecode(handle)
 
 	if id == nil or buffer.readu8(vowStates, id) ~= STATE_PENDING then return end
@@ -637,15 +662,23 @@ cancelInternal = function(handle: Vow): ()
 		const kind = buffer.readu8(nodeKinds, node)
 		const child = nodeChildren[slot]
 		const waiting = nodeThreads[slot]
+		const finalCb = if kind == NODE_FINALLY then nodeFinally[slot] else nil
 
 		unlinkOwner(node)
 		releaseNode(node)
 
 		if kind == NODE_CALLBACK or kind == NODE_ADOPT or kind == NODE_AGGREGATE then
-			if child ~= nil then cancelInternal(child) end
+			if child ~= nil then cancelInternal(child, fireFinally) end
 		elseif kind == NODE_AWAIT then
 			if waiting ~= nil then task.spawn(waiting, false, nil) end
+		elseif kind == NODE_FINALLY and fireFinally then
+			if finalCb ~= nil then
+				const ok, err = pcall(finalCb, false, nil)
+				if not ok then task.defer(error, err, 0) end
+			end
 		end
+
+		if fireFinally and tryDecode(handle) == nil then return end
 	end
 end
 
@@ -727,7 +760,7 @@ resolveValue = function(id: number, value: any): ()
 		buffer.writeu8(vowHandled, adopted, 1)
 		settle(id, STATE_REJECTED, vowValues[adopted + 1])
 	elseif state == STATE_CANCELLED then
-		cancelInternal(handleOf(id))
+		cancelInternal(handleOf(id), true)
 	end
 end
 
@@ -875,7 +908,7 @@ function Vow.andThen<T, E, R, R_e>(id: Vow<T, E>, onResolved: Handler<T, R>?, on
 		buffer.writeu8(vowHandled, parent, 1)
 		invokeCallback(onRejected, vowValues[parent + 1], child, true)
 	elseif state == STATE_CANCELLED then
-		cancelInternal(child)
+		cancelInternal(child, true)
 	end
 
 	return child
@@ -895,6 +928,39 @@ function Vow.catch<_, E, R_e>(id: Vow, onRejected: (value: E) -> R_e): Vow<R_e>
 	if type(onRejected) ~= "function" then error("Vow.catch: onRejected must be a function", 2) end
 
 	return Vow.andThen(id, nil, onRejected)
+end
+
+--[=[
+    Attaches a callback invoked exactly once when this Vow settles
+    (resolved, rejected, or cancelled). The callback receives (ok, value)
+    and its return value is ignored. Errors thrown by the callback are
+    deferred and raised asynchronously.
+
+    Does not allocate a child Vow and is not subject to cancellation
+    (it always fires if the Vow settles for any reason). On an
+    already-settled Vow, the callback is spawned asynchronously.
+
+    @param id Vow
+    @param callback (ok: boolean, value: any) -> ()
+]=]
+@native
+function Vow.finally<T, E>(id: Vow<T, E>, callback: (ok: boolean, value: T?) -> ()): ()
+	if type(callback) ~= "function" then error("Vow.finally: callback must be a function", 2) end
+
+	const slot = decode(id, "finally")
+	const state = buffer.readu8(vowStates, slot)
+
+	if state == STATE_PENDING then
+		makeFinallyNode(slot, callback)
+		return
+	end
+
+	-- Already settled: spawn to avoid re-enterant dispatch from the caller's frame
+	const ok, value = (state == STATE_RESOLVED), vowValues[slot + 1]
+	task.spawn(function()
+		const success, err = pcall(callback, ok, value)
+		if not success then task.defer(error, err, 0) end
+	end)
 end
 
 --[=[
@@ -966,7 +1032,7 @@ end
 ]=]
 function Vow.cancel(id: Vow): ()
 	decode(id, "cancel")
-	cancelInternal(id)
+	cancelInternal(id, true)
 end
 
 --[=[
@@ -984,7 +1050,7 @@ function Vow.destroy(handle: Vow): ()
 	local slot = decode(handle, "destroy")
 
 	if buffer.readu8(vowStates, slot) == STATE_PENDING then
-		cancelInternal(handle)
+		cancelInternal(handle, false)
 		slot = decode(handle, "destroy")
 	end
 
@@ -1038,7 +1104,7 @@ function Vow.all<T, E>(vows: { Vow<T, E> }): Vow<{ [number]: T, n: number }, E>
 			aggregateStep(result, STATE_REJECTED, vowValues[inputId + 1], index)
 			break
 		elseif state == STATE_CANCELLED then
-			cancelInternal(result)
+			cancelInternal(result, true)
 			break
 		end
 	end
@@ -1082,7 +1148,7 @@ function Vow.race<T, E>(vows: { Vow<T, E> }): Vow<T, E>
 			settle(parent, STATE_REJECTED, vowValues[inputId + 1])
 			break
 		elseif state == STATE_CANCELLED then
-			cancelInternal(result)
+			cancelInternal(result, true)
 			break
 		end
 	end
