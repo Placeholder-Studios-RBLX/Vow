@@ -199,8 +199,8 @@ local function growVowsTo(newCapacity: number)
 	vowAggregateRemaining = growU32(vowAggregateRemaining, vowCapacity, newCapacity)
 	vowAdopts = growU32(vowAdopts, vowCapacity, newCapacity)
 
-	local newValues = table.create(newCapacity)
-	local newAggResults = table.create(newCapacity)
+	local newValues = table.create(newCapacity) :: { any }
+	local newAggResults = table.create(newCapacity) :: { { any }? }
 	table.move(vowValues, 1, vowCapacity, 1, newValues)
 	table.move(vowAggregateResults, 1, vowCapacity, 1, newAggResults)
 	vowValues = newValues
@@ -219,10 +219,10 @@ local function growNodesTo(newCapacity: number)
 	nodeOwners = growU32(nodeOwners, nodeCapacity, newCapacity)
 	nodeIndices = growU32(nodeIndices, nodeCapacity, newCapacity)
 
-	local newResolved = table.create(newCapacity)
-	local newRejected = table.create(newCapacity)
-	local newChildren = table.create(newCapacity)
-	local newThreads = table.create(newCapacity)
+	local newResolved = table.create(newCapacity) :: { ((value: any) -> any)? }
+	local newRejected = table.create(newCapacity) :: { ((value: any) -> any)? }
+	local newChildren = table.create(newCapacity) :: { number? }
+	local newThreads = table.create(newCapacity) :: { thread? }
 
 	table.move(nodeResolved, 1, nodeCapacity, 1, newResolved)
 	table.move(nodeRejected, 1, nodeCapacity, 1, newRejected)
@@ -746,7 +746,7 @@ local function validateInputs(vows: { Vow }, method: string): ({ Vow }, number)
 
 	if count ~= maxIndex then error(`Vow.{method}: sparse arrays are not allowed`, 3) end
 
-	local snapshot = table.create(count)
+	local snapshot = table.create(count) :: { Vow }
 	for index = 1, count do
 		snapshot[index] = rawget(vows, index)
 	end
@@ -773,7 +773,8 @@ local Vow = {}
 function Vow.new(executor: Executor): Vow
 	if type(executor) ~= "function" then error("Vow.new: executor must be a function", 2) end
 
-	local id, handle = acquireVow()
+	-- Since the executor may yield, using the id may be unsafe, so tryDecode is used instead
+	local _, handle = acquireVow()
 	local ok, err = pcall(executor, handle)
 
 	if not ok then
