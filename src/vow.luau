@@ -119,6 +119,10 @@ local vowHandled: buffer = buffer.create(INITIAL_VOWS)
 local vowAggregateModes: buffer = buffer.create(INITIAL_VOWS)
 local vowAggregateRemaining: buffer = buffer.create(INITIAL_VOWS * 4)
 local vowAdopts: buffer = buffer.create(INITIAL_VOWS * 4)
+local vowParents: buffer = buffer.create(INITIAL_VOWS * 4)
+local vowChildHeads: buffer = buffer.create(INITIAL_VOWS * 4)
+local vowChildNexts: buffer = buffer.create(INITIAL_VOWS * 4)
+local vowChildPrevs: buffer = buffer.create(INITIAL_VOWS * 4)
 
 local vowFree: buffer = buffer.create(INITIAL_VOWS * 4)
 local vowFreeLength = 0
@@ -202,6 +206,10 @@ const function growVowsTo(newCapacity: number)
 	vowAggregateModes = growU8(vowAggregateModes, vowCapacity, newCapacity)
 	vowAggregateRemaining = growU32(vowAggregateRemaining, vowCapacity, newCapacity)
 	vowAdopts = growU32(vowAdopts, vowCapacity, newCapacity)
+	vowParents = growU32(vowParents, vowCapacity, newCapacity)
+	vowChildHeads = growU32(vowChildHeads, vowCapacity, newCapacity)
+	vowChildNexts = growU32(vowChildNexts, vowCapacity, newCapacity)
+	vowChildPrevs = growU32(vowChildPrevs, vowCapacity, newCapacity)
 
 	const newValues = table.create(newCapacity) :: { any }
 	const newAggResults = table.create(newCapacity) :: { { any }? }
@@ -288,6 +296,10 @@ const function releaseVow(id: number): ()
 	buffer.writeu32(vowOwnedTails, id * 4, 0)
 	buffer.writeu32(vowAggregateRemaining, id * 4, 0)
 	buffer.writeu32(vowAdopts, id * 4, 0)
+	buffer.writeu32(vowParents, id * 4, 0)
+	buffer.writeu32(vowChildHeads, id * 4, 0)
+	buffer.writeu32(vowChildNexts, id * 4, 0)
+	buffer.writeu32(vowChildPrevs, id * 4, 0)
 
 	if generation >= GENERATION_SPACE then
 		buffer.writeu32(vowGens, id * 4, GENERATION_SPACE - 1)
@@ -462,6 +474,32 @@ const function unlinkOwner(node: number): ()
 	buffer.writeu32(nodeOwners, node * 4, 0)
 	buffer.writeu32(nodeOwnerPrevious, node * 4, 0)
 	buffer.writeu32(nodeOwnerNext, node * 4, 0)
+end
+
+const function linkChild(parent: number, child: number): ()
+	const oldHead = buffer.readu32(vowChildHeads, parent * 4)
+	buffer.writeu32(vowParents, child * 4, parent + 1)
+	buffer.writeu32(vowChildNexts, child * 4, oldHead)
+	buffer.writeu32(vowChildPrevs, child * 4, 0)
+	if oldHead ~= 0 then buffer.writeu32(vowChildPrevs, (oldHead - 1) * 4, child + 1) end
+	buffer.writeu32(vowChildHeads, parent * 4, child + 1)
+end
+
+const function unlinkChild(parent: number, child: number): ()
+	const prev = buffer.readu32(vowChildPrevs, child * 4)
+	const nextSib = buffer.readu32(vowChildNexts, child * 4)
+
+	if prev == 0 then
+		buffer.writeu32(vowChildHeads, parent * 4, nextSib)
+	else
+		buffer.writeu32(vowChildNexts, (prev - 1) * 4, nextSib)
+	end
+
+	if nextSib ~= 0 then buffer.writeu32(vowChildPrevs, (nextSib - 1) * 4, prev) end
+
+	buffer.writeu32(vowParents, child * 4, 0)
+	buffer.writeu32(vowChildNexts, child * 4, 0)
+	buffer.writeu32(vowChildPrevs, child * 4, 0)
 end
 
 const function popSourceHead(source: number): number?
@@ -683,6 +721,10 @@ cancelInternal = function(handle: Vow, fireFinally: boolean): ()
 end
 
 destroyInternal = function(id: number): ()
+	-- Unlink from parent if the parent is still alive
+	const encParent = buffer.readu32(vowParents, id * 4)
+	if encParent ~= 0 then unlinkChild(encParent - 1, id) end
+
 	detachOwned(id)
 
 	while true do
@@ -701,7 +743,33 @@ destroyInternal = function(id: number): ()
 		end
 	end
 
+	-- Clear the parent pointers of any child vows
+	local childHead = buffer.readu32(vowChildHeads, id * 4)
+	while childHead ~= 0 do
+		const childId = childHead - 1
+		childHead = buffer.readu32(vowChildNexts, childId * 4)
+		buffer.writeu32(vowParents, childId * 4, 0)
+		buffer.writeu32(vowChildNexts, childId * 4, 0)
+		buffer.writeu32(vowChildPrevs, childId * 4, 0)
+	end
+	buffer.writeu32(vowChildHeads, id * 4, 0)
+
 	releaseVow(id)
+end
+
+const function destroyChainInternal(id: number): ()
+	-- Guard against double-visit
+	if buffer.readu8(vowStates, id) == 0 then return end
+
+	while true do
+		const head = buffer.readu32(vowChildHeads, id * 4)
+		if head == 0 then break end
+		destroyChainInternal(head - 1)
+	end
+
+	if buffer.readu8(vowStates, id) == STATE_PENDING then cancelInternal(handleOf(id), false) end
+
+	destroyInternal(id)
 end
 
 const function isAdoptionCycle(id: number, adopted: number): boolean
@@ -754,6 +822,7 @@ resolveValue = function(id: number, value: any): ()
 	if state == STATE_PENDING then
 		buffer.writeu32(vowAdopts, id * 4, adopted + 1)
 		makeNode(NODE_ADOPT, adopted, id, 0, nil, nil, handleOf(id), nil)
+		linkChild(adopted, id)
 	elseif state == STATE_RESOLVED then
 		settle(id, STATE_RESOLVED, vowValues[adopted + 1])
 	elseif state == STATE_REJECTED then
@@ -898,8 +967,9 @@ function Vow.andThen<T, E, R, R_e>(id: Vow<T, E>, onResolved: Handler<T, R>?, on
 	if onRejected ~= nil and type(onRejected) ~= "function" then error("Vow.andThen: onRejected must be a function or nil", 2) end
 
 	const childId, child = acquireVow()
-	const state = buffer.readu8(vowStates, parent)
+	linkChild(parent, childId)
 
+	const state = buffer.readu8(vowStates, parent)
 	if state == STATE_PENDING then
 		makeNode(NODE_CALLBACK, parent, childId, 0, onResolved, onRejected, child, nil)
 	elseif state == STATE_RESOLVED then
@@ -1055,6 +1125,15 @@ function Vow.destroy(handle: Vow): ()
 	end
 
 	destroyInternal(slot)
+end
+
+--[=[
+	Functions like destroy, but also destroys any Vows that depend on it.
+
+	@param handle Vow -- the Vow handle to destroy
+]=]
+function Vow.destroyChain(handle: Vow)
+	destroyChainInternal(decode(handle, "destroyChain"))
 end
 
 --[=[
