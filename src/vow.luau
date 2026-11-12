@@ -502,6 +502,18 @@ const function unlinkChild(parent: number, child: number): ()
 	buffer.writeu32(vowChildPrevs, child * 4, 0)
 end
 
+const function getPending(id: number): number
+	local pending = 0
+
+	local n = buffer.readu32(vowHeads, id * 4)
+	while n ~= 0 do
+		pending += 1
+		n = buffer.readu32(nodeNext, (n - 1) * 4)
+	end
+
+	return pending
+end
+
 const function popSourceHead(source: number): number?
 	const encoded = buffer.readu32(vowHeads, source * 4)
 	if encoded == 0 then return nil end
@@ -619,17 +631,30 @@ const function dispatch(id: number, state: number, value: any): ()
 	const childState = if rejected then STATE_REJECTED else STATE_RESOLVED
 	const handle = handleOf(id)
 
-	while true do
+	-- Snapshot the current listener count. Invariant: this count is fixed for the duration of the
+	-- dispatch (no additions from callbacks)
+	local pending = getPending(id)
+
+	-- First pass: process non-finally nodes in registration order
+	-- Finally nodes get popped off and reappended to the tail, deferring them
+	while pending > 0 do
+		pending -= 1
+
 		const node = popSourceHead(id)
-		if node == nil then break end
+		if node == nil then return end
 
 		const slot = node + 1
 		const kind = buffer.readu8(nodeKinds, node)
+
+		if kind == NODE_FINALLY then
+			appendSource(id, node) -- Rotate to tail
+			continue
+		end
+
 		const index = buffer.readu32(nodeIndices, node * 4)
 		const child = nodeChildren[slot]
 		const waiting = nodeThreads[slot]
 		const callback = if rejected then nodeRejected[slot] else nodeResolved[slot]
-		const finalCb = if kind == NODE_FINALLY then nodeFinally[slot] else nil
 
 		unlinkOwner(node)
 		releaseNode(node)
@@ -647,14 +672,30 @@ const function dispatch(id: number, state: number, value: any): ()
 			if waiting ~= nil then task.spawn(waiting, not rejected, value) end
 		elseif kind == NODE_AGGREGATE then
 			if child ~= nil then aggregateStep(child, childState, value, index) end
-		elseif kind == NODE_FINALLY then
-			if finalCb ~= nil then
-				const ok, err = pcall(finalCb, not rejected, value)
-				if not ok then task.defer(error, err, 0) end
-			end
 		end
 
 		-- Bail if a callback destroyed or recycled this Vow
+		if tryDecode(handle) == nil then return end
+	end
+
+	-- Second pass: run deferred finally nodes in registration order
+	while true do
+		const node = popSourceHead(id)
+		if node == nil then break end
+
+		const slot = node + 1
+		const finalCb = nodeFinally[slot]
+
+		unlinkOwner(node)
+		releaseNode(node)
+
+		if rejected then buffer.writeu8(vowHandled, id, 1) end
+
+		if finalCb ~= nil then
+			const ok, err = pcall(finalCb, not rejected, value)
+			if not ok then task.defer(error, err, 0) end
+		end
+
 		if tryDecode(handle) == nil then return end
 	end
 end
@@ -692,15 +733,24 @@ cancelInternal = function(handle: Vow, fireFinally: boolean): ()
 
 	detachOwned(id)
 
-	while true do
+	local pending = getPending(id)
+
+	while pending > 0 do
+		pending -= 1
+
 		const node = popSourceHead(id)
-		if node == nil then break end
+		if node == nil then return end
 
 		const slot = node + 1
 		const kind = buffer.readu8(nodeKinds, node)
+
+		if kind == NODE_FINALLY then
+			appendSource(id, node)
+			continue
+		end
+
 		const child = nodeChildren[slot]
 		const waiting = nodeThreads[slot]
-		const finalCb = if kind == NODE_FINALLY then nodeFinally[slot] else nil
 
 		unlinkOwner(node)
 		releaseNode(node)
@@ -709,14 +759,23 @@ cancelInternal = function(handle: Vow, fireFinally: boolean): ()
 			if child ~= nil then cancelInternal(child, fireFinally) end
 		elseif kind == NODE_AWAIT then
 			if waiting ~= nil then task.spawn(waiting, false, nil) end
-		elseif kind == NODE_FINALLY and fireFinally then
-			if finalCb ~= nil then
-				const ok, err = pcall(finalCb, false, nil)
-				if not ok then task.defer(error, err, 0) end
-			end
 		end
+	end
 
-		if fireFinally and tryDecode(handle) == nil then return end
+	while true do
+		const node = popSourceHead(id)
+		if node == nil then break end
+
+		const slot = node + 1
+		const finalCb = if fireFinally then nodeFinally[slot] else nil
+
+		unlinkOwner(node)
+		releaseNode(node)
+
+		if finalCb ~= nil then
+			const ok, err = pcall(finalCb, false, nil)
+			if not ok then task.defer(error, err, 0) end
+		end
 	end
 end
 
@@ -724,6 +783,17 @@ destroyInternal = function(id: number): ()
 	-- Unlink from parent if the parent is still alive
 	const encParent = buffer.readu32(vowParents, id * 4)
 	if encParent ~= 0 then unlinkChild(encParent - 1, id) end
+
+	-- Clear the parent pointers of any child vows
+	local childHead = buffer.readu32(vowChildHeads, id * 4)
+	while childHead ~= 0 do
+		const childId = childHead - 1
+		childHead = buffer.readu32(vowChildNexts, childId * 4)
+		buffer.writeu32(vowParents, childId * 4, 0)
+		buffer.writeu32(vowChildNexts, childId * 4, 0)
+		buffer.writeu32(vowChildPrevs, childId * 4, 0)
+	end
+	buffer.writeu32(vowChildHeads, id * 4, 0)
 
 	detachOwned(id)
 
@@ -742,17 +812,6 @@ destroyInternal = function(id: number): ()
 			if waiting ~= nil then task.spawn(waiting, false, nil) end
 		end
 	end
-
-	-- Clear the parent pointers of any child vows
-	local childHead = buffer.readu32(vowChildHeads, id * 4)
-	while childHead ~= 0 do
-		const childId = childHead - 1
-		childHead = buffer.readu32(vowChildNexts, childId * 4)
-		buffer.writeu32(vowParents, childId * 4, 0)
-		buffer.writeu32(vowChildNexts, childId * 4, 0)
-		buffer.writeu32(vowChildPrevs, childId * 4, 0)
-	end
-	buffer.writeu32(vowChildHeads, id * 4, 0)
 
 	releaseVow(id)
 end
