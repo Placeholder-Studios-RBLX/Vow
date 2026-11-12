@@ -689,8 +689,6 @@ const function dispatch(id: number, state: number, value: any): ()
 		unlinkOwner(node)
 		releaseNode(node)
 
-		if rejected then buffer.writeu8(vowHandled, id, 1) end
-
 		if finalCb ~= nil then
 			const ok, err = pcall(finalCb, not rejected, value)
 			if not ok then task.defer(error, err, 0) end
