@@ -950,6 +950,28 @@ function Vow.new(executor: Executor): Vow
 end
 
 --[=[
+	Creates a Vow (same as Vow.new) but automatically attaches a Vow.finally
+	that runs Vow.destroyChain, automatically cleaning up the Vow after it
+	has settled.
+
+	@param executor Executor -- function receiving the new Vow handle
+	@return Vow -- a generation-tagged integer handle that automatically cleans itself up after settling.
+]=]
+@native
+function Vow.newAuto(executor: Executor): Vow
+	if type(executor) ~= "function" then error("Vow.newAuto: executor must be a function", 2) end
+
+	const id = Vow.new(executor)
+	buffer.writeu8(vowHandled, decode(id, "newAuto"), 1) -- Suppress unhandled raise
+
+	Vow.finally(id, function()
+		if Vow.isAlive(id) then Vow.destroyChain(id) end
+	end)
+
+	return id
+end
+
+--[=[
 	Resolves a pending Vow with one value.
 
 	If value is another live Vow, this Vow adopts that Vow's eventual
