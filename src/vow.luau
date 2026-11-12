@@ -626,6 +626,9 @@ const function invokeCallback(callback: Handler, value: any, child: Vow, rejecte
 	end
 end
 
+-- Invariant: no listener may be registered on a Vow during that Vow's dispatch. All current APIs
+-- respect this; any new API that can append to vowHeads[id] on a settled Vow must route through
+-- task.defer
 const function dispatch(id: number, state: number, value: any): ()
 	const rejected = state == STATE_REJECTED
 	const childState = if rejected then STATE_REJECTED else STATE_RESOLVED
@@ -949,8 +952,13 @@ end
 
 --[=[
 	Creates a Vow (same as Vow.new) but automatically attaches a Vow.finally
-	that runs Vow.destroyChain, automatically cleaning up the Vow after it
-	has settled.
+	that runs Vow.destroyChain. 
+	
+	Cleanup is deferred by one scheduler step after settlement. Callers may
+	attach listeners in that window; any andThen children created in the
+	window will be destroyed along with the parent. Rejections on the auto
+	Vow do not raise unhandled-rejection errors; rejections on any andThen
+	children still do.
 
 	@param executor Executor -- function receiving the new Vow handle
 	@return Vow -- a generation-tagged integer handle that automatically cleans itself up after settling.
@@ -960,7 +968,8 @@ function Vow.newAuto(executor: Executor): Vow
 	if type(executor) ~= "function" then error("Vow.newAuto: executor must be a function", 2) end
 
 	const id = Vow.new(executor)
-	buffer.writeu8(vowHandled, decode(id, "newAuto"), 1) -- Suppress unhandled raise
+	const slot = tryDecode(id)
+	if slot ~= nil then buffer.writeu8(vowHandled, slot, 1) end -- Suppress unhandled raise
 
 	if buffer.readu8(vowStates, id) == STATE_PENDING then
 		Vow.finally(id, function()
@@ -1087,13 +1096,18 @@ end
 
 --[=[
     Attaches a callback invoked exactly once when this Vow settles
-    (resolved, rejected, or cancelled). The callback receives (ok, value)
-    and its return value is ignored. Errors thrown by the callback are
-    deferred and raised asynchronously.
+    (resolved, rejected, or cancelled). The callback receives (true, value)
+	on resolve, (false, rejectionValue) on reject, and (false, nil) on cancel.
+	destroying does not execute finally callbacks. The callback's return value
+	is ignored. Errors thrown by the callback are deferred and raised
+	asynchronously.
 
     Does not allocate a child Vow and is not subject to cancellation
-    (it always fires if the Vow settles for any reason). On an
-    already-settled Vow, the callback is spawned asynchronously.
+    (it always fires if the Vow settles for any reason).
+
+	Callbacks run synchronously inside dispatch and may yield, which suspends
+	the caller of Vow.resolve / Vow.Reject / Vow.cancel. Use task.spawn inside
+	the callback if you do not want this.
 
     @param id Vow
     @param callback (ok: boolean, value: any) -> ()
@@ -1216,6 +1230,8 @@ end
 	Functions like destroy, but also destroys any Vows that depend on it.
 	This only targets vows chained with Vow.andThen or Vow.catch, adopted
 	vows are not counted.
+
+	Does not trigger finally callbacks, and wakes awaiters with (false, nil).
 
 	@param handle Vow -- the Vow handle to destroy
 ]=]
