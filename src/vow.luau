@@ -964,9 +964,16 @@ function Vow.newAuto(executor: Executor): Vow
 	const id = Vow.new(executor)
 	buffer.writeu8(vowHandled, decode(id, "newAuto"), 1) -- Suppress unhandled raise
 
-	Vow.finally(id, function()
-		if Vow.isAlive(id) then Vow.destroyChain(id) end
-	end)
+	if buffer.readu8(vowStates, id) == STATE_PENDING then
+		Vow.finally(id, function()
+			if Vow.isAlive(id) then Vow.destroyChain(id) end
+		end)
+	else
+		-- Already settled, defer so the caller gets a live handle for one tick
+		task.defer(function()
+			if Vow.isAlive(id) then Vow.destroyChain(id) end
+		end)
+	end
 
 	return id
 end
