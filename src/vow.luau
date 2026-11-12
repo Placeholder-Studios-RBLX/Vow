@@ -822,7 +822,6 @@ resolveValue = function(id: number, value: any): ()
 	if state == STATE_PENDING then
 		buffer.writeu32(vowAdopts, id * 4, adopted + 1)
 		makeNode(NODE_ADOPT, adopted, id, 0, nil, nil, handleOf(id), nil)
-		linkChild(adopted, id)
 	elseif state == STATE_RESOLVED then
 		settle(id, STATE_RESOLVED, vowValues[adopted + 1])
 	elseif state == STATE_REJECTED then
@@ -1129,6 +1128,8 @@ end
 
 --[=[
 	Functions like destroy, but also destroys any Vows that depend on it.
+	This only targets vows chained with Vow.andThen or Vow.catch, adopted
+	vows are not counted.
 
 	@param handle Vow -- the Vow handle to destroy
 ]=]
