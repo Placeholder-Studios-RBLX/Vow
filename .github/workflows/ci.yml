@@ -1,0 +1,18 @@
+name: Test
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+jobs:
+    lute-tests:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+
+            - name: Setup Rokit
+              uses: CompeyDev/setup-rokit@v0.2.1
+
+            - name: Run Lute tests
+              run: lute test
