@@ -156,6 +156,12 @@ local nodeFreeCapacity = INITIAL_NODES
 
 -- ============================== internals ================================
 
+-- stylua: ignore
+const task: typeof(task) =
+	if game then task
+	elseif pcall(require, "@lune/task") then require("@lune/task") :: any
+	else require("@std/task") :: any 
+
 local settle: (id: number, state: number, value: any) -> ()
 local cancelInternal: (handle: Vow, fireFinally: boolean) -> ()
 local destroyInternal: (id: number) -> ()
@@ -969,9 +975,10 @@ function Vow.newAuto(executor: Executor): Vow
 
 	const id = Vow.new(executor)
 	const slot = tryDecode(id)
-	if slot ~= nil then buffer.writeu8(vowHandled, slot, 1) end -- Suppress unhandled raise
+	if slot == nil then return id end
+	buffer.writeu8(vowHandled, slot, 1) -- Suppress unhandled raise
 
-	if buffer.readu8(vowStates, id) == STATE_PENDING then
+	if buffer.readu8(vowStates, slot) == STATE_PENDING then
 		Vow.finally(id, function()
 			if Vow.isAlive(id) then Vow.destroyChain(id) end
 		end)
